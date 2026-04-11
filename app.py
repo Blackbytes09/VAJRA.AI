@@ -1,6 +1,12 @@
 
 import streamlit as st
 import time
+import sys
+import os
+
+# CTO Fix: Add current directory to path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 from PIL import Image
 from vajra_core import VajraCore
 from bhasha_engine import t
