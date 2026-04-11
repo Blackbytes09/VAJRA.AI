@@ -1,0 +1,37 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    // Collection: scans
+    // Document ID: auto-generated
+    // Fields:
+    //   - userId: string (required)
+    //   - filename: string (required, < 255 chars)
+    //   - verdict: string (required, enum: DEEPFAKE, SUSPICIOUS, AUTHENTIC)
+    //   - score: number (required, 0-100)
+    //   - timestamp: string (required, ISO 8601)
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() { return request.auth != null; }
+    function isOwner(userId) { return isAuthenticated() && request.auth.uid == userId; }
+    function hasRequiredFields(fields) { return request.resource.data.keys().hasAll(fields); }
+    function isValidScan(data) {
+      return hasRequiredFields(['userId', 'filename', 'verdict', 'score', 'timestamp']) &&
+             data.userId is string &&
+             data.filename is string && data.filename.size() < 255 &&
+             data.verdict in ['DEEPFAKE', 'SUSPICIOUS', 'AUTHENTIC'] &&
+             data.score is number && data.score >= 0 && data.score <= 100 &&
+             data.timestamp is string;
+    }
+
+    match /scans/{scanId} {
+      allow read: if isAuthenticated() && isOwner(resource.data.userId);
+      allow create: if isAuthenticated() && isValidScan(request.resource.data) && isOwner(request.resource.data.userId);
+      allow update: if false; // Scans are immutable
+      allow delete: if false;
+    }
+  }
+}

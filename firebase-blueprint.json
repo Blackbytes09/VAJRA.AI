@@ -1,0 +1,23 @@
+{
+  "entities": {
+    "ForensicScan": {
+      "title": "ForensicScan",
+      "description": "A record of a deepfake forensic analysis",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "The ID of the user who performed the scan" },
+        "filename": { "type": "string", "description": "The name of the uploaded file" },
+        "verdict": { "type": "string", "description": "The forensic verdict (DEEPFAKE, SUSPICIOUS, AUTHENTIC)" },
+        "score": { "type": "number", "description": "The manipulation probability score" },
+        "timestamp": { "type": "string", "format": "date-time", "description": "When the scan was performed" }
+      },
+      "required": ["userId", "filename", "verdict", "score", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/scans/{scanId}": {
+      "schema": "ForensicScan",
+      "description": "Collection of forensic scan results"
+    }
+  }
+}
