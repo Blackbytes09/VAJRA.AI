@@ -17,11 +17,22 @@ if not firebase_admin._apps:
     with open('firebase-applet-config.json', 'r') as f:
         config = json.load(f)
     
-    # Set environment variable for Admin SDK
-    os.environ["GOOGLE_CLOUD_PROJECT"] = config['projectId']
+    # Create a dummy service account dict from config
+    # Note: In production, you should use a real service account JSON file
+    cred_dict = {
+        "type": "service_account",
+        "project_id": config['projectId'],
+        "private_key_id": "none",
+        "private_key": "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n",
+        "client_email": "admin@" + config['projectId'] + ".iam.gserviceaccount.com",
+        "client_id": "none",
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+        "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/" + config['projectId'] + ".iam.gserviceaccount.com"
+    }
     
-    # Initialize with default credentials
-    cred = credentials.ApplicationDefault()
+    cred = credentials.Certificate(cred_dict)
     firebase_admin.initialize_app(cred, {
         'projectId': config['projectId']
     })
