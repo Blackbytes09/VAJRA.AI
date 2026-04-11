@@ -13,10 +13,14 @@ import os
 
 # Initialize Firebase Admin
 if not firebase_admin._apps:
-    # Load config to get project ID
+    # Load config
     with open('firebase-applet-config.json', 'r') as f:
         config = json.load(f)
     
+    # Set environment variable for Admin SDK
+    os.environ["GOOGLE_CLOUD_PROJECT"] = config['projectId']
+    
+    # Initialize with default credentials
     cred = credentials.ApplicationDefault()
     firebase_admin.initialize_app(cred, {
         'projectId': config['projectId']
