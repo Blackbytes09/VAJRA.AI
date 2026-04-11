@@ -13,8 +13,14 @@ import os
 
 # Initialize Firebase Admin
 if not firebase_admin._apps:
+    # Load config to get project ID
+    with open('firebase-applet-config.json', 'r') as f:
+        config = json.load(f)
+    
     cred = credentials.ApplicationDefault()
-    firebase_admin.initialize_app(cred)
+    firebase_admin.initialize_app(cred, {
+        'projectId': config['projectId']
+    })
 db = firestore.client()
 
 # Initialize Gemini
