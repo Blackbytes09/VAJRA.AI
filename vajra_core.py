@@ -17,8 +17,10 @@ if not firebase_admin._apps:
     with open('firebase-applet-config.json', 'r') as f:
         config = json.load(f)
     
+    # Set environment variable for Admin SDK
+    os.environ["GOOGLE_CLOUD_PROJECT"] = config['projectId']
+    
     # Create a dummy service account dict from config
-    # Note: In production, you should use a real service account JSON file
     cred_dict = {
         "type": "service_account",
         "project_id": config['projectId'],
@@ -36,6 +38,9 @@ if not firebase_admin._apps:
     firebase_admin.initialize_app(cred, {
         'projectId': config['projectId']
     })
+
+# Force set the env var again just in case
+os.environ["GOOGLE_CLOUD_PROJECT"] = config['projectId']
 db = firestore.client()
 
 # Initialize Gemini
