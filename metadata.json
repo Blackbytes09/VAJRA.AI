@@ -1,0 +1,8 @@
+{
+  "name": "Vajra AI - Deepfake Detection",
+  "description": "India's Most Advanced Deepfake Detection Platform using AI and Forensic Analysis.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
