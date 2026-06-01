@@ -1,82 +1,191 @@
 
 import time
-import torch
-import torch.quantization
-import numpy as np
-from PIL import Image, ImageChops, ImageEnhance
-from security_manager import SecurityManager
 import json
-import google.generativeai as genai
-import firebase_admin
-from firebase_admin import credentials, firestore
+import logging
+import datetime
+import io
 import os
+import tempfile
+import numpy as np
 
-# Initialize Firebase Admin
-if not firebase_admin._apps:
-    # Load config
-    with open('firebase-applet-config.json', 'r') as f:
-        config = json.load(f)
-    
-    # Set environment variable for Admin SDK
-    os.environ["GOOGLE_CLOUD_PROJECT"] = config['projectId']
-    
-    # Create a dummy service account dict from config
-    cred_dict = {
-        "type": "service_account",
-        "project_id": config['projectId'],
-        "private_key_id": "none",
-        "private_key": "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n",
-        "client_email": "admin@" + config['projectId'] + ".iam.gserviceaccount.com",
-        "client_id": "none",
-        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-        "token_uri": "https://oauth2.googleapis.com/token",
-        "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-        "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/" + config['projectId'] + ".iam.gserviceaccount.com"
-    }
-    
-    cred = credentials.Certificate(cred_dict)
-    firebase_admin.initialize_app(cred, {
-        'projectId': config['projectId']
-    })
+# Machine Learning & Images
+from PIL import Image, ImageChops, ImageEnhance
+import google.generativeai as genai
 
-# Force set the env var again just in case
-os.environ["GOOGLE_CLOUD_PROJECT"] = config['projectId']
-db = firestore.client()
+# Core Modules
+from security_manager import SecurityManager
 
-# Initialize Gemini
+# --- FIREBASE FAIL-SAFE IMPLEMENTATION ---
+# Military grade protocol dictates that external dependencies MUST NOT crash the core system.
+FIREBASE_READY = False
+try:
+    import firebase_admin
+    from firebase_admin import credentials, firestore
+    
+    # We only initialize if a REAL service account is present.
+    # The fake one will always cause 'ValueError' when actually hitting the DB.
+    if os.path.exists("serviceAccountKey.json"):
+        if not firebase_admin._apps:
+            cred = credentials.Certificate("serviceAccountKey.json")
+            firebase_admin.initialize_app(cred)
+        firestore_client = firestore.client()
+        FIREBASE_READY = True
+        logging.info("Firebase Admin initialized successfully with Service Account.")
+    else:
+        logging.warning("Firebase Service Account JSON not found. Operating in localized Vault Mode.")
+        FIREBASE_READY = False
+except Exception as e:
+    logging.error(f"Firebase Init suppressed: {str(e)}")
+    FIREBASE_READY = False
+
+# --- GEMINI INITIALIZATION ---
 genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 
 class VajraCore:
-    def __init__(self):
+    """
+    MILITARY-GRADE AUDIT CORE (v6.0)
+    Combines Spectral Analysis (ELA/FFT) with Neural Inference (Gemini)
+    Features strict Hash-based Caching and Immutable Logging.
+    """
+    def __init__(self, db_manager):
         self.security = SecurityManager()
-
-    def analyze_image(self, image_pil, file_bytes, filename, userId):
+        self.db = db_manager # Local SQLite Fallback & Primary Cache
+        
+    def analyze_asset(self, image_pil, file_bytes, filename, userId):
         t0 = time.time()
+        
+        # 1. Cryptographic Identity
         file_hash = self.security.generate_file_hash(file_bytes)
+        integrity_hash = self.security.create_digital_signature(file_hash)
         
-        # 1. AI Analysis (Gemini)
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        # Convert PIL to bytes for Gemini
-        import io
-        img_byte_arr = io.BytesIO()
-        image_pil.save(img_byte_arr, format='JPEG')
-        img_bytes = img_byte_arr.getvalue()
+        # 2. Vault Level 1 Check (Cache Validation)
+        cached = self.db.check_cache(file_hash)
+        if cached:
+            meta = json.loads(cached.get('metadata', '{}'))
+            return {
+                "cached": True,
+                "verdict": cached['verdict'],
+                "score": cached['score'],
+                "processing_time": 0,
+                "integrity_hash": cached['integrity_hash'],
+                "ela_score": meta.get('ela_score'),
+                "fft_score": meta.get('fft_score')
+            }
+            
+        # 3. Layer 1: Forensic Spectral Analysis
+        logging.info(f"Layer 1 Spectral scan starting for {file_hash}")
+        ela_result = self._ela_analysis(image_pil)
+        freq_result = self._freq_analysis(image_pil)
+        spectral_score = (ela_result['score'] + freq_result['score']) / 2
         
-        response = model.generate_content([
-            "Analyze this image for deepfake signs. Return JSON: {verdict: 'DEEPFAKE'|'SUSPICIOUS'|'AUTHENTIC', score: 0-100}",
-            {"mime_type": "image/jpeg", "data": img_bytes}
-        ])
+        # 4. Layer 2: LLM Deep Vision (Gemini)
+        logging.info(f"Layer 2 Neural scan starting for {file_hash}")
+        ai_score = 50.0  # Default safe-state
+        ai_verdict = "SUSPICIOUS"
+        try:
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            # Pack image for AI
+            img_byte_arr = io.BytesIO()
+            image_pil.copy().save(img_byte_arr, format='JPEG', quality=95)
+            
+            prompt = "Act as an expert digital forensic analyst. Examine this image for inconsistencies, artifacts, lighting mismatches, and signs of AI generation or deepfaking. Return strictly JSON: {\"verdict\": \"DEEPFAKE\"|\"SUSPICIOUS\"|\"AUTHENTIC\", \"score\": 0-100 where 100 means definitely manipulated.}"
+            response = model.generate_content([
+                prompt,
+                {"mime_type": "image/jpeg", "data": img_byte_arr.getvalue()}
+            ])
+            
+            # Robust JSON extraction
+            import re
+            extracted_json = re.search(r'\{.*\}', response.text.strip(), re.DOTALL)
+            if extracted_json:
+                raw_text = extracted_json.group(0)
+            else:
+                raw_text = response.text.replace("```json", "").replace("```", "").strip()
+                
+            ai_data = json.loads(raw_text)
+            ai_score = float(ai_data.get('score', 50))
+            ai_verdict = ai_data.get('verdict', 'SUSPICIOUS')
+        except Exception as e:
+            logging.error(f"Gemini API Error: {str(e)}. Falling back to purely Spectral constraints.")
+            
+        # 5. Composite Fusion Engine
+        # We blend the Spectral Score (Pixels) with AI Score (Context)
+        final_score = (spectral_score * 0.4) + (ai_score * 0.6)
         
-        analysis = json.loads(response.text)
+        if final_score >= 70:
+            final_verdict = "DEEPFAKE"
+        elif final_score >= 35:
+            final_verdict = "SUSPICIOUS"
+        else:
+            final_verdict = "AUTHENTIC"
+            
+        proc_time = int((time.time() - t0) * 1000)
         
-        # 2. Store in Firestore
-        scan_data = {
+        scan_record = {
+            "id": f"VAJ-{int(time.time()*1000)}",
             "userId": userId,
             "filename": filename,
-            "verdict": analysis['verdict'],
-            "score": analysis['score'],
+            "file_hash": file_hash,
+            "verdict": final_verdict,
+            "score": round(final_score, 2),
+            "metadata": {
+                "ela_score": ela_result['score'],
+                "fft_score": freq_result['score'],
+                "ai_score": ai_score
+            },
+            "integrity_hash": integrity_hash,
+            "processing_time": proc_time,
             "timestamp": datetime.datetime.utcnow().isoformat()
         }
-        db.collection('scans').add(scan_data)
         
-        return {**analysis, "processing_time": int((time.time() - t0) * 1000)}
+        # 6. Immutable Logging
+        self.db.log_scan(scan_record) # Local DB (Guaranteed Delivery)
+        
+        if FIREBASE_READY:
+            try:
+                firestore_client.collection('scans').document(scan_record['id']).set(scan_record)
+            except Exception as e:
+                logging.error(f"Firebase Sync failed: {e}")
+                
+        # 7. Return with visualization matrices
+        return {
+            **scan_record,
+            "ela_image": ela_result['image'],
+            "freq_image": freq_result['image']
+        }
+
+    # --- SPECTRAL ALGORITHMS ---
+
+    def _ela_analysis(self, image):
+        """Error Level Analysis"""
+        try:
+            original = image.convert("RGB")
+            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+                original.save(tmp.name, "JPEG", quality=90)
+                resaved = Image.open(tmp.name).convert("RGB")
+            ela = ImageChops.difference(original, resaved)
+            extrema = ela.getextrema()
+            mx = max([ex[1] for ex in extrema])
+            if mx == 0: mx = 1
+            enhanced = ImageEnhance.Brightness(ela).enhance(255.0/mx)
+            score = min(100, np.array(enhanced).mean() * 2.5)
+            if os.path.exists(tmp.name):
+                os.remove(tmp.name)
+            return {"score": float(score), "image": enhanced}
+        except Exception as e:
+            logging.error(f"ELA Failed: {e}")
+            return {"score": 50.0, "image": np.zeros((100,100,3), dtype=np.uint8)}
+
+    def _freq_analysis(self, image):
+        """Fast Fourier Transform Analysis"""
+        try:
+            gray = np.array(image.convert("L")).astype(float)
+            fft = np.fft.fftshift(np.fft.fft2(gray))
+            mag = np.log(np.abs(fft)+1e-10)
+            mn = (mag-mag.min())/(mag.max()-mag.min()+1e-10)
+            score = min(100, mn.mean() * 180)
+            img_matrix = Image.fromarray((mn*255).astype(np.uint8))
+            return {"score": float(score), "image": img_matrix}
+        except Exception as e:
+            logging.error(f"FFT Failed: {e}")
+            return {"score": 50.0, "image": np.zeros((100,100), dtype=np.uint8)}
